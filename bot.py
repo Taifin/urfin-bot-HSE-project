@@ -17,6 +17,7 @@ else:
     password = 'taifin'
 
 TYPING_AMOUNT, TYPING_TYPE, TYPING_TIME, TYPING_COMMENT = range(4)
+GET_DATE = 0
 
 users = {}  # TODO: bad idea
 
@@ -25,7 +26,7 @@ class DBOperationalSuccess(Exception):
     pass
 
 
-class BotOperationalSuccess(Exception):
+class BotOperationalSuccess:
     def __init__(self, opt=""):
         self.optional_info = opt
 
@@ -44,25 +45,26 @@ class UserNewAdd:
 
 def open_connection(database='urfin_users', query='\\d'):  # open connection and execute command
     connection = ''
-    cursor = ''
     try:
         connection = psycopg2.connect(user="postgres",
                                       password=password,
                                       host='localhost',
                                       port='5432',
                                       database=database)
-        cursor = connection.cursor()
-        try:
-            cursor.execute(query)
-        except DuplicateTable:
-            raise BotOperationalSuccess
-        connection.commit()
-        raise DBOperationalSuccess
+        with connection.cursor() as cursor:
+            try:
+                cursor.execute(query)
+            except DuplicateTable:
+                raise DBOperationalSuccess
+            connection.commit()
+            try:
+                return cursor.fetchall()
+            except psycopg2.ProgrammingError:
+                return
     except psycopg2.Error as Error:
         raise Error  # TODO add errors to user-named log files
     finally:
         if connection:
-            cursor.close()
             connection.close()
 
 
@@ -76,7 +78,7 @@ def create_table(table_name):
                           "user_time TIMESTAMP, "
                           "comment TEXT"
                           ");".format(table_name))
-    open_connection(query="INSERT INTO list_of_all_users (username) '{0}'".format(table_name))
+    return open_connection(query="INSERT INTO list_of_all_users (username) '{0}'".format(table_name))
 
 
 def init(message):  # check existence of user and create table if necessary
@@ -86,18 +88,64 @@ def init(message):  # check existence of user and create table if necessary
             """.format(message)
     try:
         open_connection(query=query)
-    except BotOperationalSuccess:
-        raise BotOperationalSuccess("Table already exists!")
+        return BotOperationalSuccess("Table already exists!")
     except DBOperationalSuccess:
         try:
-            create_table(message)
-        except DBOperationalSuccess:
-            raise BotOperationalSuccess("Table successfully created!")
+            if create_table(message):
+                return BotOperationalSuccess("Table successfully created!")
         except psycopg2.Error:
             raise DBOperationalError
 
 
-def day_lookup():  # return to user info from particular day
+def day_lookup(username, day):
+    query = "SELECT amount, type, user_time, comment FROM {0} WHERE day='{1}'".format(username, day)
+    return open_connection(query=query)
+
+
+def parse_date(date):
+    now = datetime.datetime.now()
+    if len(date) <= 2:
+        real_date = str(now.year) + '-' + str(now.month) + '-' + date
+        return real_date
+    for fmt in ("%Y-%m-%d", "%Y %m %d", "%Y.%m.%d", "%Y,%m,%d", "%Y\\%m\\%d", "%Y/%m/%d"):
+        try:
+            formatted = datetime.datetime.strptime(date, fmt)
+            print(formatted)
+            return formatted.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+
+def bot_day_lookup(update: Update, context: CallbackContext):  # return to user info from particular day
+    # TODO: add option to merge data into a table?
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Please, enter the date you want to get "
+                                                                    "information on. You can enter the date in two "
+                                                                    "ways: a single or two digits meaning day of "
+                                                                    "current month or full date, including year, "
+                                                                    "month and day (please, mind the separators, "
+                                                                    "such as ',', '.', ' ', '/', '\\', '-').")
+
+    return GET_DATE
+
+
+def bot_receive_date(update: Update, context: CallbackContext):
+    user_date = parse_date(update.message.text)
+    data = day_lookup(update.message.from_user.username, user_date)
+    print(data)  # debug
+    if not data:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
+                                                                        "specified day, please, try again!")
+        # TODO: suggest finding closest (all?) days
+    else:
+        response = ''
+        for row in data:
+            response += 'Spent {0} on {1} at {2}, your comment: {3}\n'.format(row[0], row[1],
+                                                                              row[2].strftime("%I:%M:%S"), row[3])
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Here's what I found!:\n" + response)
+    return ConversationHandler.END
+
+
+def category_lookup():
     # TODO
     pass
 
@@ -118,7 +166,7 @@ def bot_help(update: Update, context: CallbackContext):
                                                                     "/add_inline - initiate process of adding new"
                                                                     "transaction in a single line\n"
                                                                     "/addhelp - show tips for using 'add' command\n"
-                                                                    "/lookup - coming soon\n"
+                                                                    "/daylookup - get info on particular day\n"
                                                                     "/help - well, don't you know what's that for???")
 
 
@@ -150,7 +198,7 @@ def bot_add(update: Update, context: CallbackContext):
     return TYPING_AMOUNT
 
 
-def bot_receive_amount(update: Update):
+def bot_receive_amount(update: Update, context: CallbackContext):
     amount = update.message.text
     update.message.reply_text("W-w-wonderful! Going next: what was the type of the spending?")
     users[update.effective_user.username].amount = amount
@@ -234,19 +282,27 @@ if __name__ == "__main__":
     dispatcher.add_handler(CommandHandler('start', bot_start))
     dispatcher.add_handler(CommandHandler('help', bot_help))
     dispatcher.add_handler(CommandHandler('addhelp', bot_addhelp))
-    conv = ConversationHandler(entry_points=[CommandHandler('add', bot_add)],
-                               states={
-                                   TYPING_AMOUNT: [
-                                       MessageHandler(Filters.all,
-                                                      bot_receive_amount)],
-                                   TYPING_TYPE: [
-                                       MessageHandler(Filters.text & (~Filters.command), bot_receive_type)],
-                                   TYPING_TIME: [
-                                       MessageHandler(Filters.text & (~Filters.command) & Filters.regex('\d\d:\d\d'),
-                                                      bot_receive_time)],
-                                   TYPING_COMMENT: [
-                                       MessageHandler(Filters.text & (~Filters.command), bot_receive_comment)]},
-                               fallbacks=[MessageHandler(~Filters.command, bot_message)])
-    dispatcher.add_handler(conv)
+    add_conv = ConversationHandler(entry_points=[CommandHandler('add', bot_add)],
+                                   states={
+                                       TYPING_AMOUNT: [
+                                           MessageHandler(Filters.all,
+                                                          bot_receive_amount)],
+                                       TYPING_TYPE: [
+                                           MessageHandler(Filters.text & (~Filters.command), bot_receive_type)],
+                                       TYPING_TIME: [
+                                           MessageHandler(
+                                               Filters.text & (~Filters.command) & Filters.regex('\d\d:\d\d'),
+                                               bot_receive_time)],
+                                       TYPING_COMMENT: [
+                                           MessageHandler(Filters.text & (~Filters.command), bot_receive_comment)]},
+                                   fallbacks=[MessageHandler(~Filters.command, bot_message)])
+    day_lookup_conv = ConversationHandler(entry_points=[CommandHandler('daylookup', bot_day_lookup)],
+                                          states={
+                                              GET_DATE: [
+                                                  MessageHandler(Filters.text & (~Filters.command), bot_receive_date)]},
+                                          # TODO: regex for date
+                                          fallbacks=[MessageHandler(~Filters.command, bot_message)])
+    dispatcher.add_handler(add_conv)
+    dispatcher.add_handler(day_lookup_conv)
     updater.start_polling()
     updater.idle()
