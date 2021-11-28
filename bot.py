@@ -1,10 +1,14 @@
+import os
 import sys
+
+from openpyxl.styles.borders import Border, Side, BORDER_THIN
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, CallbackContext, Filters, CommandHandler, ConversationHandler
 import psycopg2
 import psycopg2.errors
 import datetime
 import logging
+import openpyxl
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
@@ -17,16 +21,24 @@ else:
     password = 'taifin'
 
 TYPING_AMOUNT, TYPING_TYPE, TYPING_TIME, TYPING_COMMENT = range(4)
-GET_DATE = 0
+GET_DAY_LOOKUP = 0
+GET_CATEGORY = 0
+GET_MONTH_LOOKUP = 0
 
-users = {}  # TODO: bad idea
+thin_border = Border(
+    left=Side(border_style=BORDER_THIN, color='00000000'),
+    right=Side(border_style=BORDER_THIN, color='00000000'),
+    top=Side(border_style=BORDER_THIN, color='00000000'),
+    bottom=Side(border_style=BORDER_THIN, color='00000000')
+)
+users = {}  # TODO: library's build-in user_data
 
 
 class DBOperationalSuccess(Exception):
     pass
 
 
-class BotOperationalSuccess:
+class BotOperationalSuccess:  # TODO: really don't like it
     def __init__(self, opt=""):
         self.optional_info = opt
 
@@ -97,8 +109,18 @@ def init(message):  # check existence of user and create table if necessary
             raise DBOperationalError
 
 
-def day_lookup(username, day):
-    query = "SELECT amount, type, user_time, comment FROM {0} WHERE day='{1}'".format(username, day)
+def lookup(username, col, user_date):
+    query = "SELECT amount, type, user_time, comment FROM {0} WHERE {1}='{2}'".format(username, col, user_date)
+    return open_connection(query=query)
+
+
+def lookup_month(username, col, user_date):
+    query = "SELECT amount, type, day, user_time, comment FROM {0} WHERE {1}='{2}'".format(username, col, user_date)
+    return open_connection(query=query)
+
+
+def user_help_categories(username):
+    query = "SELECT type FROM {0}".format(username)
     return open_connection(query=query)
 
 
@@ -116,45 +138,154 @@ def parse_date(date):
             pass
 
 
+def add(username, user, day, user_time):
+    query = "INSERT INTO {0} (amount, type, day, creation_time, user_time, comment)" \
+            " VALUES ({1}, '{2}', '{3}', CURRENT_TIMESTAMP, '{4}', '{5}');".format(username, user.amount,
+                                                                                   user.type,
+                                                                                   day,
+                                                                                   user_time,
+                                                                                   user.comment)
+    return open_connection(query=query)
+
+
+def bot_check_stop_in_lookup(line, update: Update, context: CallbackContext):
+    if "urfin_end" in line.lower():
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Stop lookup!")
+        return True
+    else:
+        return False
+
+
+def bot_check_stop_in_add(line, update: Update, context: CallbackContext):
+    if "urfin_end" in line.lower:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Stop lookup!")
+        users.pop(update.effective_user.username)  # TODO: not sure if it's best way
+        return True
+    else:
+        return False
+
+
+def bot_category_lookup(update: Update, context: CallbackContext):
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Please, enter the category you want to get "
+                                                                    "information on.")
+    return GET_CATEGORY
+
+
 def bot_day_lookup(update: Update, context: CallbackContext):  # return to user info from particular day
-    # TODO: add option to merge data into a table?
+    # TODO: add option to merge data into a table? (for month lookup)
     context.bot.send_message(chat_id=update.effective_chat.id, text="Please, enter the date you want to get "
                                                                     "information on. You can enter the date in two "
-                                                                    "ways: a single or two digits meaning day of "
-                                                                    "current month or full date, including year, "
+                                                                    "ways: a single or two digits meaning month"
+                                                                    " or full date, including year, "
                                                                     "month and day (please, mind the separators, "
                                                                     "such as ',', '.', ' ', '/', '\\', '-').")
 
-    return GET_DATE
+    return GET_DAY_LOOKUP
 
 
-def bot_receive_date(update: Update, context: CallbackContext):
-    user_date = parse_date(update.message.text)
-    data = day_lookup(update.message.from_user.username, user_date)
+def bot_month_lookup(update: Update, context: CallbackContext):
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Please, enter the month you want to get"
+                                                                    "information on.")
+
+    return GET_MONTH_LOOKUP
+
+
+def bot_categorylookup_receive_category(update: Update, context: CallbackContext):
+    user_data = update.message.text
+
+    if bot_check_stop_in_lookup(user_data, update, context):
+        return ConversationHandler.END
+
+    if user_data == "bot_cats":
+        data = user_help_categories(update.message.from_user.username)
+        response = ''
+        for row in data:
+            response += "{0}\n".format(row[0])
+        context.bot.send_message(chat_id=update.effective_chat.id,
+                                 text="Here are all the categories that you've logged:\n" + response)
+        return GET_CATEGORY
+
+    data = lookup(update.message.from_user.username, "type", user_data.lower())
     print(data)  # debug
+
     if not data:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
-                                                                        "specified day, please, try again!")
-        # TODO: suggest finding closest (all?) days
+        context.bot.send_message(chat_id=update.effective_chat.id,
+                                 text="Hm... I can't find that category, please, try again! If you need help "
+                                      "remembering your categories, type 'bot_cats' (though we have no cats, sorry :( "
+                                      ").")
+        return GET_CATEGORY
+
     else:
         response = ''
         for row in data:
             response += 'Spent {0} on {1} at {2}, your comment: {3}\n'.format(row[0], row[1],
                                                                               row[2].strftime("%I:%M:%S"), row[3])
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Here's what I found!:\n" + response)
+            return ConversationHandler.END
+
+
+def bot_daylookup_receive_date(update: Update, context: CallbackContext):
+    user_data = parse_date(update.message.text)
+
+    if bot_check_stop_in_lookup(user_data, update, context):
+        return ConversationHandler.END
+
+    data = lookup(update.message.from_user.username, "day", user_data)
+    print(data)  # debug
+
+    if not data:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
+                                                                        "specified day, please, try again!")
+        return GET_DAY_LOOKUP
+        # TODO: suggest finding closest (all?) days
+
+    else:
+        response = ''
+        for row in data:
+            response += 'Spent {0} on {1} at {2}, your comment: {3}\n'.format(row[0], row[1],  # TODO: fix format
+                                                                              row[2].strftime("%I:%M:%S"), row[3])
         context.bot.send_message(chat_id=update.effective_chat.id, text="Here's what I found!:\n" + response)
-    return ConversationHandler.END
+        return ConversationHandler.END
 
 
-def category_lookup():
-    # TODO
-    pass
+def bot_monthlookup_receive_month(update: Update, context: CallbackContext):  # TODO: some sorting?
+    user_data = update.message.text
+
+    if bot_check_stop_in_lookup(user_data, update, context):
+        return ConversationHandler.END
+
+    data = lookup_month(update.message.from_user.username, "EXTRACT(MONTH FROM day)", user_data)
+
+    if not data:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
+                                                                        "specified month, please, try again!")
+        return GET_DAY_LOOKUP
+    else:
+        output_table = openpyxl.Workbook()
+        ws = output_table.active
+
+        table_headers = ["Amount", "Type", "Date", "Time", "Comment"]
+        for i in range(1, 6):
+            ws.cell(1, i).value = table_headers[i - 1]
+            ws.cell(1, i).border = thin_border
+
+        for i in range(len(data)):
+            for j in range(len(data[i])):
+                ws.cell(i + 2, j + 1).value = data[i][j]
+
+        output_table.save(update.effective_user.username + ".xlsx")
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Your monthly table is ready! Sending...")
+        context.bot.send_document(chat_id=update.effective_chat.id,
+                                  document=open(update.effective_user.username + ".xlsx", "rb"),
+                                  filename=update.effective_chat.username + '.xlsx')
+        os.remove(update.effective_user.username + ".xlsx")
 
 
 def bot_start(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Checking if there's already a table for you.")
     try:
         init(update.effective_user.username)
-    except BotOperationalSuccess as res:
+    except BotOperationalSuccess as res:  # TODO: fix
         context.bot.send_message(chat_id=update.effective_chat.id, text=res.optional_info)
 
 
@@ -167,6 +298,10 @@ def bot_help(update: Update, context: CallbackContext):
                                                                     "transaction in a single line\n"
                                                                     "/addhelp - show tips for using 'add' command\n"
                                                                     "/daylookup - get info on particular day\n"
+                                                                    "/categorylookup - get info on particular "
+                                                                    "category\n"
+                                                                    "/monthlookup - get all the info on particular "
+                                                                    "month (in format of .xlsx file)\n"
                                                                     "/help - well, don't you know what's that for???")
 
 
@@ -198,16 +333,25 @@ def bot_add(update: Update, context: CallbackContext):
     return TYPING_AMOUNT
 
 
-def bot_receive_amount(update: Update, context: CallbackContext):
+def bot_add_receive_amount(update: Update, context: CallbackContext):
     amount = update.message.text
-    update.message.reply_text("W-w-wonderful! Going next: what was the type of the spending?")
+
+    if bot_check_stop_in_lookup(amount, update, context):
+        return ConversationHandler.END
+
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Wonderful! Going next: what was the type of the "
+                                                                    "spending?")
     users[update.effective_user.username].amount = amount
 
     return TYPING_TYPE
 
 
-def bot_receive_type(update: Update, context: CallbackContext):
+def bot_add_receive_type(update: Update, context: CallbackContext):
     transaction_type = update.message.text.lower()
+
+    if bot_check_stop_in_lookup(transaction_type, update, context):
+        return ConversationHandler.END
+
     users[update.effective_user.username].type = transaction_type
     context.bot.send_message(chat_id=update.effective_chat.id, text="Now let's talk about time. If you remember "
                                                                     "approximate time of your spending, enter it "
@@ -217,40 +361,43 @@ def bot_receive_type(update: Update, context: CallbackContext):
     return TYPING_TIME
 
 
-def bot_receive_time(update: Update, context: CallbackContext):
+def bot_add_receive_time(update: Update, context: CallbackContext):
     user_time = update.message.text
+
+    if bot_check_stop_in_lookup(user_time, update, context):
+        return ConversationHandler.END
+
     users[update.effective_user.username].time = user_time
     context.bot.send_message(chat_id=update.effective_chat.id, text="Any commentaries? Leave blank if no.")
 
     return TYPING_COMMENT
 
 
-def bot_receive_comment(update: Update, context: CallbackContext):
+def bot_add_receive_comment(update: Update, context: CallbackContext):
     comment = update.message.text
+
+    if bot_check_stop_in_lookup(comment, update, context):
+        return ConversationHandler.END
+
+    users[update.effective_user.username].comment = comment
     context.bot.send_message(chat_id=update.effective_chat.id, text="Okay, everything is set up, now I'm trying to "
                                                                     "add your record into database.")
-    users[update.effective_user.username].comment = comment
 
-    user = users[update.effective_user.username]
-    now = datetime.datetime.now()
-
-    query = "INSERT INTO {0} (amount, type, day, creation_time, user_time, comment)" \
-            " VALUES ({1}, '{2}', '{3}', '{4}', '{5}', '{6}');".format(update.effective_user.username, user.amount,
-                                                                       user.type,
-                                                                       str(now.year) +
-                                                                       str(now.month) + str(now.month),
-                                                                       datetime.datetime.now().strftime(
-                                                                           '%Y-%m-%d %H:%M:%S'),
-                                                                       datetime.datetime(now.year, now.month,
-                                                                                         day=now.day,
-                                                                                         hour=int(user.time[:2]),
-                                                                                         minute=int(
-                                                                                             user.time[3:])).strftime(
-                                                                           '%Y-%m-%d %H:%M:%S'),
-                                                                       user.comment)
-    open_connection(query=query)
+    bot_add_insert(update, context)
 
     return ConversationHandler.END
+
+
+def bot_add_insert(update: Update, context: CallbackContext):
+    user = users[update.effective_user.username]
+    now = datetime.datetime.now()
+    day = str(now.year) + str(now.month) + str(now.month)
+    user_time = datetime.datetime(now.year, now.month, day=now.day, hour=int(user.time[:2]),
+                                  minute=int(user.time[3:])).strftime('%Y-%m-%d %H:%M:%S')
+
+    add(update.effective_user.username, user, day, user_time)
+
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Done!")
 
 
 def bot_message(update: Update, context: CallbackContext):
@@ -270,39 +417,68 @@ def bot_addhelp(update: Update, context: CallbackContext):
                                   "Commentary is also can be anything you want!\n"
                                   "Furthermore, you can add your transaction in single-line ('/add_inline'), but the "
                                   "format is very strict (for now):\n"
-                                  "NOTE THAT SEPARATION IS TWO WHITESPACES\n"
+                                  "NOTE THAT SEPARATOR IS TWO WHITESPACES\n"
                                   "COST(line of numbers)  TYPE(line of words)  TIME(hh:mm)  COMMENT(line of words)")
+
+
+#  TODO: add buttons "Help", "Start", "Lookup", "Add"
+#       Help:
+#           addhelp, lookuphelp, help, back
+#       Start:
+#           no branches
+#       Lookup:
+#           daylookup, monthlookup, categorylookup
+#       Add:
+#           no branches
 
 
 if __name__ == "__main__":
     with open('token.txt') as f:
         token = f.readline().strip()
     updater = Updater(token=token)
+
     dispatcher = updater.dispatcher
     dispatcher.add_handler(CommandHandler('start', bot_start))
     dispatcher.add_handler(CommandHandler('help', bot_help))
     dispatcher.add_handler(CommandHandler('addhelp', bot_addhelp))
+
     add_conv = ConversationHandler(entry_points=[CommandHandler('add', bot_add)],
                                    states={
                                        TYPING_AMOUNT: [
                                            MessageHandler(Filters.all,
-                                                          bot_receive_amount)],
+                                                          bot_add_receive_amount)],
                                        TYPING_TYPE: [
-                                           MessageHandler(Filters.text & (~Filters.command), bot_receive_type)],
+                                           MessageHandler(Filters.text & (~Filters.command), bot_add_receive_type)],
                                        TYPING_TIME: [
                                            MessageHandler(
                                                Filters.text & (~Filters.command) & Filters.regex('\d\d:\d\d'),
-                                               bot_receive_time)],
+                                               bot_add_receive_time)],
                                        TYPING_COMMENT: [
-                                           MessageHandler(Filters.text & (~Filters.command), bot_receive_comment)]},
+                                           MessageHandler(Filters.text & (~Filters.command), bot_add_receive_comment)]
+                                   },
                                    fallbacks=[MessageHandler(~Filters.command, bot_message)])
     day_lookup_conv = ConversationHandler(entry_points=[CommandHandler('daylookup', bot_day_lookup)],
                                           states={
-                                              GET_DATE: [
-                                                  MessageHandler(Filters.text & (~Filters.command), bot_receive_date)]},
-                                          # TODO: regex for date
+                                              GET_DAY_LOOKUP: [
+                                                  MessageHandler(Filters.text & (~Filters.command),
+                                                                 bot_daylookup_receive_date)]},
                                           fallbacks=[MessageHandler(~Filters.command, bot_message)])
+    category_lookup_conv = ConversationHandler(entry_points=[CommandHandler('categorylookup', bot_category_lookup)],
+                                               states={
+                                                   GET_CATEGORY: [
+                                                       MessageHandler(Filters.text & (~Filters.command),
+                                                                      bot_categorylookup_receive_category)]},
+                                               fallbacks=[MessageHandler(~Filters.command, bot_message)])
+    month_lookup_conv = ConversationHandler(entry_points=[CommandHandler('monthlookup', bot_month_lookup)],
+                                            states={
+                                                GET_MONTH_LOOKUP: [
+                                                    MessageHandler(Filters.text & (~Filters.command),
+                                                                   bot_monthlookup_receive_month)]},
+                                            fallbacks=[MessageHandler(~Filters.command, bot_message)])
     dispatcher.add_handler(add_conv)
     dispatcher.add_handler(day_lookup_conv)
+    dispatcher.add_handler(category_lookup_conv)
+    dispatcher.add_handler(month_lookup_conv)
+
     updater.start_polling()
     updater.idle()
