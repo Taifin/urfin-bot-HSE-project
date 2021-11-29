@@ -56,5 +56,5 @@ Also remember that bot is using default username
 and password for PostgreSQL that is installed on your system ("postgres" and "postgres"). You can change it manually in file 'config/database.txt'.
 
 Also, the source code, as 'Coming soon' section states, is a complete rubbish, because I was
-mostly focusing on making certain features for at least somehow, not on making them good-looking. I hope
+mostly focusing on making certain features work for at least somehow, not on making them good-looking. I hope
 you won't want to gouge out your eyes (because sometimes I do :') ).
