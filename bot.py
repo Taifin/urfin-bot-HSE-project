@@ -172,7 +172,7 @@ def bot_category_lookup(update: Update, context: CallbackContext):
 
 
 def bot_day_lookup(update: Update, context: CallbackContext):  # return to user info from particular day
-    # TODO: add option to merge data into a table? (for month lookup)
+    # TODO: add option to merge data into a table
     context.bot.send_message(chat_id=update.effective_chat.id, text="Please, enter the date you want to get "
                                                                     "information on. You can enter the date in two "
                                                                     "ways: a single or two digits meaning month"
@@ -285,8 +285,8 @@ def bot_start(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Checking if there's already a table for you.")
     try:
         init(update.effective_user.username)
-    except BotOperationalSuccess as res:  # TODO: fix
-        context.bot.send_message(chat_id=update.effective_chat.id, text=res.optional_info)
+    except BotOperationalSuccess:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Everything's great!")
 
 
 def bot_help(update: Update, context: CallbackContext):
