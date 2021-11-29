@@ -2,7 +2,7 @@
 
 ### Description:
 
-Urfin - is a telegram bot that allows you to log your spending in a (almost) convenient way and access them in different ways.
+Urfin - is a telegram bot that allows you to log your spending in an (almost) convenient way and access them in different ways.
 It is created using a [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) wrapper for TelegramAPI and 
 PostgreSQL database to store users' info.
 
