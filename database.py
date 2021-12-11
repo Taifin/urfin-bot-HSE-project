@@ -66,12 +66,12 @@ def create_table(table_name):
                           "user_time TIMESTAMP, "
                           "comment TEXT"
                           ");".format(table_name))
-    return open_connection(query="INSERT INTO list_of_all_users_old (username) '{0}'".format(table_name))
+    return open_connection(query="INSERT INTO list_of_all_users (username) '{0}'".format(table_name))
 
 
 def init_new_user(message):  # check existence of user and create table if necessary
     query = """SELECT COUNT(1) 
-                FROM list_of_all_users_old 
+                FROM list_of_all_users 
                 WHERE username = '{0}';
             """.format(message)
     try:
