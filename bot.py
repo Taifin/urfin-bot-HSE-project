@@ -20,16 +20,6 @@ thin_border = Border(
     bottom=Side(border_style=BORDER_THIN, color='00000000')
 )
 
-users = {}  # TODO: library's built-in user_data
-
-
-class UserNewAdd:
-    def __init__(self):
-        self.amount = 0
-        self.type = ""
-        self.time = "00:00"
-        self.comment = ""
-
 
 def parse_date(date):
     now = datetime.datetime.now()
@@ -39,7 +29,6 @@ def parse_date(date):
     for fmt in ("%Y-%m-%d", "%Y %m %d", "%Y.%m.%d", "%Y,%m,%d", "%Y\\%m\\%d", "%Y/%m/%d"):
         try:
             formatted = datetime.datetime.strptime(date, fmt)
-            print(formatted)
             return formatted.strftime("%Y-%m-%d")
         except ValueError:
             pass
@@ -55,8 +44,7 @@ def bot_check_stop_in_lookup(line, update: Update, context: CallbackContext):
 
 def bot_check_stop_in_add(line, update: Update, context: CallbackContext):
     if "urfin_end" in line.lower:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Stop lookup!")
-        users.pop(update.effective_user.username)  # TODO: not sure if it's best way
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Stop add!")
         return True
     else:
         return False
@@ -94,7 +82,7 @@ def bot_categorylookup_receive_category(update: Update, context: CallbackContext
         return ConversationHandler.END
 
     if user_data == "bot_cats":
-        data = database.user_help_categories(update.message.from_user.username)
+        data = database.user_help_categories(update.message.from_user.username).fetched_info
         response = ''
         for row in data:
             response += "{0}\n".format(row[0])
@@ -102,8 +90,7 @@ def bot_categorylookup_receive_category(update: Update, context: CallbackContext
                                  text="Here are all the categories that you've logged:\n" + response)
         return GET_CATEGORY
 
-    data = database.lookup(update.message.from_user.username, "type", user_data.lower())
-    print(data)  # debug
+    data = database.lookup(update.message.from_user.username, "type", user_data.lower()).fetched_info
 
     if not data:
         context.bot.send_message(chat_id=update.effective_chat.id,
@@ -127,21 +114,36 @@ def bot_daylookup_receive_date(update: Update, context: CallbackContext):
     if bot_check_stop_in_lookup(user_data, update, context):
         return ConversationHandler.END
 
-    data = database.lookup(update.message.from_user.username, "day", user_data)
-    print(data)  # debug
+    data = database.lookup(update.message.from_user.username, "day", user_data).fetched_info
 
     if not data:
         context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
                                                                         "specified day, please, try again!")
         return GET_DAY_LOOKUP
-        # TODO: suggest finding closest (all?) days
 
     else:
-        response = ''
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Records found, preparing to send them to you!")
+
+        amount_size = 12
+        category_size = 14
+        date_size = 12
+        comment_size = 13
+
+        for row in data:  # Yes, it's slow, but pretty :3
+            amount_size = max(amount_size, len(row[0]))
+            category_size = max(category_size, len(row[1]))
+            comment_size = max(comment_size, len(row[3]))
+
+        response = "```\n|{0}|{1}|{2}|{3}|\n".format("Amount".center(amount_size, '-'),
+                                                     "Category".center(category_size, '-'),
+                                                     "Date".center(date_size, '-'), "Comment".center(comment_size, '-'))
+
         for row in data:
-            response += 'Spent {0} on {1} at {2}, your comment: {3}\n'.format(row[0], row[1],  # TODO: fix format
-                                                                              row[2].strftime("%I:%M:%S"), row[3])
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Here's what I found!:\n" + response)
+            response += "|{0}|{1}|{2}|{3}|\n".format(row[0].center(amount_size), row[1].center(category_size),
+                                                     row[2].strftime("%I:%M:%S").center(date_size),
+                                                     row[3].center(comment_size))
+
+        context.bot.send_message(chat_id=update.effective_chat.id, text=response + "\n```", parse_mode='MarkdownV2')
         return ConversationHandler.END
 
 
@@ -151,7 +153,7 @@ def bot_monthlookup_receive_month(update: Update, context: CallbackContext):  # 
     if bot_check_stop_in_lookup(user_data, update, context):
         return ConversationHandler.END
 
-    data = database.lookup_month(update.message.from_user.username, "EXTRACT(MONTH FROM day)", user_data)
+    data = database.lookup_month(update.message.from_user.username, "EXTRACT(MONTH FROM day)", user_data).fetched_info
 
     if not data:
         context.bot.send_message(chat_id=update.effective_chat.id, text="Hm... It seems that there's no data from "
@@ -181,9 +183,10 @@ def bot_monthlookup_receive_month(update: Update, context: CallbackContext):  # 
 def bot_start(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Checking if there's already a table for you.")
     try:
-        database.init_new_user(update.effective_user.username)
-    except database.BotOperationalSuccess:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Everything's great!")
+        operation = database.init_new_user(update.effective_user.username)
+        context.bot.send_message(chat_id=update.effective_chat.id, text=operation.message)  # Created/exists
+    except database.psycopg2.Error:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, something went wrong")
 
 
 def bot_help(update: Update, context: CallbackContext):
@@ -204,28 +207,50 @@ def bot_help(update: Update, context: CallbackContext):
                                                                     "you can type 'urfin_stop'.")
 
 
+def bot_addhelp(update: Update, context: CallbackContext):
+    context.bot.send_message(chat_id=update.effective_chat.id,
+                             text="Okay, here's what's you need to know before use '/add' command:\n"
+                                  "If you are asked of transaction cost, please, send it in format of single line of "
+                                  "numbers\n"
+                                  "If you need to send me type of transaction, "
+                                  "feel free to type anything you want\n"
+                                  "When the time is asked, I will give you advice on that\n"
+                                  "Commentary is also can be anything you want!\n\n"
+                                  "Furthermore, you can add your transaction in single-line ('/add_inline'), "
+                                  "but the format is very strict:\n\n"
+                                  "CONSIDER '__' AS TWO WHITESPACES, IT IS IMPORTANT\n\n"
+                                  "/add_inline__COST(line of numbers)__TYPE(line of words)__"
+                                  "TIME(hh:mm)__COMMENT(line of words, may be empty)")
+
+
 def bot_add_inline(update: Update, context: CallbackContext):
     msg = update.message.text.split('  ')
-    amount = msg[0]
-    transaction_type = msg[1].join(' ')
-    user_time = msg[2]
-    comment = msg[3].join(' ')
-    day = str(datetime.datetime.now().day) + '.' + str(datetime.datetime.now().month)
-    system_time = datetime.datetime.now()
-
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Trying to add your record into database.")
-    query = "INSERT INTO {0} (amount, type, day, creation_time, user_time, comment)" \
-            " VALUES ({1}, '{2}', '{3}', '{4}', '{5}', '{6}');".format(update.effective_user.id, amount,
-                                                                       transaction_type,
-                                                                       day, system_time, user_time, comment)
     try:
-        database.open_connection(query=query)
-    except database.BotOperationalSuccess as res:
-        context.bot.send_message(chat_id=update.effective_chat.id, text=res.optional_info)
+        amount = msg[1]
+        transaction_type = msg[2]
+
+        user_time = msg[3]
+        now = datetime.datetime.now()
+        user_time = datetime.datetime(now.year, now.month, day=now.day, hour=int(user_time[:2]),
+                                      minute=int(user_time[3:])).strftime('%Y-%m-%d %H:%M:%S')
+        if len(msg) > 4:
+            comment = msg[4]
+        else:
+            comment = ""
+        day = str(now.year) + str(now.month) + str(now.month)
+
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Trying to add your record into database.")
+        try:
+            database.add(update.effective_user.username, amount, transaction_type, day, user_time, comment)
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Done!")
+        except database.psycopg2.Error:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, something went wrong. :(")
+    except IndexError:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="It seems, you've entered something in wrong "
+                                                                        "format, please, try again.")
 
 
 def bot_add(update: Update, context: CallbackContext):
-    users[update.effective_user.username] = UserNewAdd()
     context.bot.send_message(chat_id=update.effective_chat.id, text="Arrrr, you want to log some wasted money? "
                                                                     "Please tell me how much.")
 
@@ -240,7 +265,7 @@ def bot_add_receive_amount(update: Update, context: CallbackContext):
 
     context.bot.send_message(chat_id=update.effective_chat.id, text="Wonderful! Going next: what was the type of the "
                                                                     "spending?")
-    users[update.effective_user.username].amount = amount
+    context.user_data["amount"] = amount
 
     return TYPING_TYPE
 
@@ -251,7 +276,7 @@ def bot_add_receive_type(update: Update, context: CallbackContext):
     if bot_check_stop_in_lookup(transaction_type, update, context):
         return ConversationHandler.END
 
-    users[update.effective_user.username].type = transaction_type
+    context.user_data["type"] = transaction_type
     context.bot.send_message(chat_id=update.effective_chat.id, text="Now let's talk about time. If you remember "
                                                                     "approximate time of your spending, enter it "
                                                                     "in "
@@ -266,7 +291,7 @@ def bot_add_receive_time(update: Update, context: CallbackContext):
     if bot_check_stop_in_lookup(user_time, update, context):
         return ConversationHandler.END
 
-    users[update.effective_user.username].time = user_time
+    context.user_data["time"] = user_time
     context.bot.send_message(chat_id=update.effective_chat.id, text="Any commentaries? Leave blank if no.")
 
     return TYPING_COMMENT
@@ -278,7 +303,7 @@ def bot_add_receive_comment(update: Update, context: CallbackContext):
     if bot_check_stop_in_lookup(comment, update, context):
         return ConversationHandler.END
 
-    users[update.effective_user.username].comment = comment
+    context.user_data["comment"] = comment
     context.bot.send_message(chat_id=update.effective_chat.id, text="Okay, everything is set up, now I'm trying to "
                                                                     "add your record into database.")
 
@@ -288,36 +313,22 @@ def bot_add_receive_comment(update: Update, context: CallbackContext):
 
 
 def bot_add_insert(update: Update, context: CallbackContext):
-    user = users[update.effective_user.username]
+    user = context.user_data
     now = datetime.datetime.now()
     day = str(now.year) + str(now.month) + str(now.month)
-    user_time = datetime.datetime(now.year, now.month, day=now.day, hour=int(user.time[:2]),
-                                  minute=int(user.time[3:])).strftime('%Y-%m-%d %H:%M:%S')
-
-    database.add(update.effective_user.username, user, day, user_time)
-
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Done!")
+    user["time"] = datetime.datetime(now.year, now.month, day=now.day, hour=int(user["time"][:2]),
+                                     minute=int(user["time"][3:])).strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        database.add(update.effective_user.username, user["amount"], user["type"], day, user["time"], user["comment"])
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Done!")
+    except database.psycopg2.Error:
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, something went wrong. :(")
 
 
 def bot_message(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Hi! Sorry, but I'm a bit stupid and I understand "
                                                                     "only certain commands, that you can check by "
                                                                     "asking me for help by '/help'.")
-
-
-def bot_addhelp(update: Update, context: CallbackContext):
-    context.bot.send_message(chat_id=update.effective_chat.id,
-                             text="Okay, here's what's you need to know before use '/add' command:\n"
-                                  "If you are asked of transaction cost, please, send it in format of single line of "
-                                  "numbers\n"
-                                  "If you need to send me type of transaction, "
-                                  "feel free to type anything you want\n"
-                                  "When the time is asked, I will give you advice on that\n"
-                                  "Commentary is also can be anything you want!\n"
-                                  "Furthermore, you can add your transaction in single-line ('/add_inline'), but the "
-                                  "format is very strict (for now):\n"
-                                  "NOTE THAT SEPARATOR IS TWO WHITESPACES\n"
-                                  "COST(line of numbers)  TYPE(line of words)  TIME(hh:mm)  COMMENT(line of words)")
 
 
 def bot_initialize_and_start():
@@ -329,6 +340,7 @@ def bot_initialize_and_start():
     dispatcher.add_handler(CommandHandler('start', bot_start))
     dispatcher.add_handler(CommandHandler('help', bot_help))
     dispatcher.add_handler(CommandHandler('addhelp', bot_addhelp))
+    dispatcher.add_handler(CommandHandler('add_inline', bot_add_inline))
 
     add_conv = ConversationHandler(entry_points=[CommandHandler('add', bot_add)],
                                    states={
@@ -384,6 +396,7 @@ def bot_initialize_and_start():
 #       Add:
 #           no branches
 
+# TODO: in general: add monthly budget
 
 if __name__ == '__main__':
     database.init()
