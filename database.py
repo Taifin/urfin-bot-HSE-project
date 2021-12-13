@@ -42,14 +42,14 @@ def open_connection(database='urfin_users', query='\\d'):  # open connection and
         with connection.cursor() as cursor:
             try:
                 cursor.execute(query)
+                return DBOperationalSuccess(cursor.fetchall())
             except (DuplicateTable, DuplicateDatabase):  # Only for create_db/table
                 return DBOperationalSuccess()
-            try:
-                return DBOperationalSuccess(cursor.fetchall())
             except psycopg2.ProgrammingError:  # Nothing to fetch
+                # logging
                 return DBOperationalSuccess()
     except psycopg2.Error as Error:
-        raise Error  # TODO add errors to user-named log files
+        raise Error
     finally:
         if connection:
             connection.close()
@@ -72,7 +72,7 @@ def init_new_user(message):  # check existence of user and create table if neces
     query = """SELECT COUNT(1) 
                 FROM list_of_all_users 
                 WHERE username = '{0}';
-            """.format(message.lower())  # TODO: it seems postgres does not recognize capital letters
+            """.format(message.lower())
     if open_connection(query=query).fetched_info[0][0] != 0:  # (0, ) - no record found in list_of_all_users
         return BotOperationalSuccess("Table already exists!")
     else:
@@ -83,16 +83,29 @@ def init_new_user(message):  # check existence of user and create table if neces
             raise Error
 
 
-def lookup(username, col, user_date, order="amount"):
-    query = "SELECT amount, type, user_time, comment FROM {0} WHERE {1}='{2}' ORDER BY {3}".format(username, col,
-                                                                                                   user_date, order)
+def lookup(username, col, user_date, order, to_ret="user_time"):
+    query = "SELECT amount, type, {0}, comment FROM {1} WHERE {2}='{3}' ORDER BY {4}".format(to_ret, username, col,
+                                                                                             user_date, order)
+
     return open_connection(query=query)
 
 
-def lookup_month(username, col, user_date, order="day"):
+def lookup_month(username, col, user_date, order):
     query = "SELECT amount, type, day, user_time, comment FROM {0} WHERE {1}='{2}' ORDER BY {3}".format(username, col,
                                                                                                         user_date,
                                                                                                         order)
+    return open_connection(query=query)
+
+
+def lookup_all_users(col, username):
+    query = "SELECT {0} FROM list_of_all_users WHERE username = '{1}'".format(col, username)
+
+    return open_connection(query=query)
+
+
+def set_all_users(col, username, amount):
+    query = "UPDATE list_of_all_users SET {0} = {1} WHERE username = '{2}'".format(col, amount, username)
+
     return open_connection(query=query)
 
 
@@ -108,4 +121,18 @@ def add(username, amount, t_type, day, time, comment):
                                                                                    day,
                                                                                    time,
                                                                                    comment)
+    return open_connection(query=query)
+
+
+def update_spent(username, col, current_month):
+    query = "SELECT amount::numeric FROM {0} WHERE {1} = '{2}'".format(username, col, current_month)
+    operation = open_connection(query=query).fetched_info
+
+    amount = 0
+
+    for row in operation:
+        amount += row[0]
+
+    query = "UPDATE list_of_all_users SET spent = {0} WHERE username = '{1}';".format(amount, username)
+
     return open_connection(query=query)
