@@ -63,14 +63,18 @@ def bot_check_stop_in_add(line, update: Update, context: CallbackContext):
 
 
 def bot_set_budget(update: Update, context: CallbackContext):
-    amount = update.message.text.split()[1]
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Got it, updating your budget!")
     try:
-        database.set_all_users("budget", update.effective_user.username.lower().lower(), amount)
+        amount = update.message.text.split()[1]
+        context.bot.send_message(chat_id=update.effective_chat.id, text="Got it, updating your budget!")
+        try:
+            database.set_all_users("budget", update.effective_user.username.lower().lower(), amount)
+            context.bot.send_message(chat_id=update.effective_chat.id,
+                                     text="Done! Your monthly budget is now {0}.".format(amount))
+        except database.psycopg2.Error:
+            context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, there's something wrong. :(")
+    except IndexError:
         context.bot.send_message(chat_id=update.effective_chat.id,
-                                 text="Done! Your monthly budget is now {0}.".format(amount))
-    except database.psycopg2.Error:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, there's something wrong. :(")
+                                 text="It seems that you forgot to type your budget, please, try again")
 
 
 def bot_category_lookup(update: Update, context: CallbackContext):
