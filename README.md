@@ -67,4 +67,4 @@ you won't want to gouge out your eyes (because sometimes I do :') ).
 
 * Not every command have fallback state, please, be careful with format.
 * `/add`: if bot has been shut down during `/add'ing` something, the next time you run it it will be waiting for finishing `/add'ing`
-* Locally, PostgreSQL does not see difference between capital and non-capital letters, so for sake of my panic I changed all username interactions into username.lower() interactions. As a result, users "Taifin" and "taifin" are actually the same for now
+* Locally, PostgreSQL does not see difference between capital and non-capital letters, so for the sake of my panic I changed all username interactions into username.lower() interactions. As a result, users "Taifin" and "taifin" are actually the same for now
