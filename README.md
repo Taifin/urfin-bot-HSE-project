@@ -20,7 +20,7 @@ PostgreSQL database to store users' info.
 
 `/addhelp` - it might be helpful to check the format of `/add` command
 
-`/add_inline` - more simple and quick way to add new record [WORK IN PROGRESS]
+`/add_inline` - more simple and quick way to add new record
 
 `/daylookup` - get information on all the records from specified day
 
@@ -28,15 +28,19 @@ PostgreSQL database to store users' info.
 
 `/monthlookup` - bot will create a .xlsx table with all your records from specified month
 
+`/set_budget` - you can set your monthly budget that will be stored in database. Every time you add new record, your amount of money left will be recalculated and presented to you
+
+`/check_budget' - bot will send you information about current budget that you set last time and also about amount of money you spent this month
+
 ### Coming soon:
 
-* New (and more readable) output format of `/...lookup` commands.
+* New (and more readable) output format of `/...lookup` commands. [DONE]
 * Syntax changes for some commands.
 * Inline keyboard and general interface improvements.
-* Sorting of data from `/...lookup` commands (and better interaction with database in general).
+* Sorting of data from `/...lookup` commands (and better interaction with database in general). [DONE]
 * Better format of month-lookup table.
 * Cloud deployment (heroku).
-* Source code improvements, because it's rubbish.
+* Source code improvements, because it's rubbish. [NOT DONE but I tried c:]
 * Personal log-files with errors.
 
 ### Packages and requirements:
@@ -58,3 +62,9 @@ and password for PostgreSQL that is installed on your system ("postgres" and "po
 Also, the source code, as 'Coming soon' section states, is a complete rubbish, because I was
 mostly focusing on making certain features work for at least somehow, not on making them good-looking. I hope
 you won't want to gouge out your eyes (because sometimes I do :') ).
+
+# Known issues
+
+* Not every command have fallback state, please, be careful with format.
+* `/add`: if bot has been shut down during `/add'ing` something, the next time you run it it will be waiting for finishing `/add'ing`
+* Locally, PostgreSQL does not see difference between capital and non-capital letters, so for sake of my panic I changed all username interactions into username.lower() interactions. As a result, users "Taifin" and "taifin" are actually the same for now
