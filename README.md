@@ -30,7 +30,7 @@ PostgreSQL database to store users' info.
 
 `/set_budget` - you can set your monthly budget that will be stored in database. Every time you add new record, your amount of money left will be recalculated and presented to you
 
-`/check_budget' - bot will send you information about current budget that you set last time and also about amount of money you spent this month
+`/check_budget` - bot will send you information about current budget that you set last time and also about amount of money you spent this month
 
 ### Coming soon:
 
